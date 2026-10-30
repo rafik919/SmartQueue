@@ -1,0 +1,378 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ORG_ADMIN
+  BRANCH_MANAGER
+  AGENT
+  CLIENT
+}
+
+enum TicketStatus {
+  WAITING
+  CALLED
+  IN_SERVICE
+  COMPLETED
+  CANCELLED
+  MISSED
+  TRANSFERRED
+  EXPIRED
+}
+
+enum TicketSource {
+  MOBILE
+  WEB
+  KIOSK
+  AGENT
+}
+
+enum QueueStatus {
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+enum CounterStatus {
+  OPEN
+  BUSY
+  PAUSED
+  CLOSED
+}
+
+enum OrgType {
+  bank
+  hospital
+  administration
+  post
+  insurance
+  telecom
+  other
+}
+
+// ── Wilaya (48 wilayas d'Algérie) ─────────────────────────────────────────────
+model Wilaya {
+  id       Int       @id
+  name     String
+  nameAr   String
+  code     String    @unique
+  communes Commune[]
+  branches Branch[]
+
+  @@map("wilayas")
+}
+
+// ── Commune ───────────────────────────────────────────────────────────────────
+model Commune {
+  id       Int     @id @default(autoincrement())
+  name     String
+  nameAr   String?
+  code     String?
+  wilayaId Int
+  wilaya   Wilaya  @relation(fields: [wilayaId], references: [id])
+  branches Branch[]
+
+  @@index([wilayaId])
+  @@map("communes")
+}
+
+// ── User ──────────────────────────────────────────────────────────────────────
+model User {
+  id                String         @id @default(uuid())
+  email             String         @unique
+  phone             String?        @unique
+  passwordHash      String
+  firstName         String
+  lastName          String
+  avatarUrl         String?
+  role              Role           @default(CLIENT)
+  isActive          Boolean        @default(true)
+  isEmailVerified   Boolean        @default(false)
+  preferredLanguage String         @default("fr")
+  fcmTokens         String[]       @default([])
+  lastLoginAt       DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  deletedAt         DateTime?
+  organizationId    String?
+  organization      Organization?  @relation(fields: [organizationId], references: [id])
+  refreshTokens     RefreshToken[]
+  tickets           Ticket[]       @relation("ClientTickets")
+  agentSessions     AgentSession[]
+  notifications     Notification[]
+  feedbacks         Feedback[]
+  favorites         UserFavorite[]
+
+  @@index([email])
+  @@index([organizationId])
+  @@map("users")
+}
+
+model UserFavorite {
+  id             String       @id @default(uuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@map("user_favorites")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+// ── Organization ──────────────────────────────────────────────────────────────
+model Organization {
+  id          String       @id @default(uuid())
+  name        String
+  nameAr      String?
+  slug        String       @unique
+  type        OrgType      @default(other)
+  logoUrl     String?
+  email       String?
+  phone       String?
+  address     String?
+  website     String?
+  description String?
+  isActive    Boolean      @default(true)
+  isVerified  Boolean      @default(false)
+  settings    Json         @default("{}")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  users       User[]
+  branches    Branch[]
+  services    Service[]
+  favoritedBy UserFavorite[]
+
+  @@index([type])
+  @@map("organizations")
+}
+
+// ── Branch ────────────────────────────────────────────────────────────────────
+model Branch {
+  id             String         @id @default(uuid())
+  name           String
+  nameAr         String?
+  address        String
+  addressAr      String?
+  latitude       Float?
+  longitude      Float?
+  phone          String?
+  email          String?
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  wilayaId       Int
+  wilaya         Wilaya         @relation(fields: [wilayaId], references: [id])
+  communeId      Int?
+  commune        Commune?       @relation(fields: [communeId], references: [id])
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  openingHours   OpeningHours[]
+  queues         Queue[]
+  counters       Counter[]
+  tickets        Ticket[]
+  agentSessions  AgentSession[]
+
+  @@index([organizationId])
+  @@index([wilayaId])
+  @@index([communeId])
+  @@map("branches")
+}
+
+model OpeningHours {
+  id        String  @id @default(uuid())
+  branchId  String
+  branch    Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  dayOfWeek Int
+  openTime  String
+  closeTime String
+  isClosed  Boolean @default(false)
+
+  @@unique([branchId, dayOfWeek])
+  @@map("opening_hours")
+}
+
+model Service {
+  id             String       @id @default(uuid())
+  name           String
+  nameAr         String?
+  description    String?
+  code           String?
+  avgServiceTime Int          @default(10)
+  priority       Int          @default(0)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  queues         Queue[]
+  tickets        Ticket[]
+
+  @@index([organizationId])
+  @@map("services")
+}
+
+model Queue {
+  id             String         @id @default(uuid())
+  name           String
+  prefix         String         @default("A")
+  status         QueueStatus    @default(ACTIVE)
+  maxSize        Int?
+  avgServiceTime Int            @default(10)
+  currentNumber  Int            @default(0)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  branchId       String
+  branch         Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  serviceId      String
+  service        Service        @relation(fields: [serviceId], references: [id])
+  tickets        Ticket[]
+  counterQueues  CounterQueue[]
+
+  @@index([branchId])
+  @@index([serviceId])
+  @@map("queues")
+}
+
+model Counter {
+  id            String         @id @default(uuid())
+  name          String
+  number        Int
+  status        CounterStatus  @default(CLOSED)
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  branchId      String
+  branch        Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  agentId       String?
+  counterQueues CounterQueue[]
+  tickets       Ticket[]
+  agentSessions AgentSession[]
+
+  @@unique([branchId, number])
+  @@index([branchId])
+  @@map("counters")
+}
+
+model CounterQueue {
+  counterId String
+  queueId   String
+  priority  Int     @default(0)
+  counter   Counter @relation(fields: [counterId], references: [id], onDelete: Cascade)
+  queue     Queue   @relation(fields: [queueId], references: [id], onDelete: Cascade)
+
+  @@id([counterId, queueId])
+  @@map("counter_queues")
+}
+
+model Ticket {
+  id                 String         @id @default(uuid())
+  code               String
+  number             Int
+  status             TicketStatus   @default(WAITING)
+  source             TicketSource   @default(MOBILE)
+  position           Int?
+  estimatedWaitMin   Int?
+  notes              String?
+  waitDurationSec    Int?
+  serviceDurationSec Int?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  calledAt           DateTime?
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  missedAt           DateTime?
+  expiresAt          DateTime?
+  customerId         String
+  customer           User           @relation("ClientTickets", fields: [customerId], references: [id])
+  queueId            String
+  queue              Queue          @relation(fields: [queueId], references: [id])
+  branchId           String
+  branch             Branch         @relation(fields: [branchId], references: [id])
+  serviceId          String
+  service            Service        @relation(fields: [serviceId], references: [id])
+  counterId          String?
+  counter            Counter?       @relation(fields: [counterId], references: [id])
+  notifications      Notification[]
+  feedback           Feedback?
+
+  @@index([queueId, status])
+  @@index([customerId, status])
+  @@index([branchId, createdAt])
+  @@index([code])
+  @@map("tickets")
+}
+
+model AgentSession {
+  id            String    @id @default(uuid())
+  startAt       DateTime  @default(now())
+  endAt         DateTime?
+  ticketsServed Int       @default(0)
+  isActive      Boolean   @default(true)
+  agentId       String
+  agent         User      @relation(fields: [agentId], references: [id])
+  branchId      String
+  branch        Branch    @relation(fields: [branchId], references: [id])
+  counterId     String
+  counter       Counter   @relation(fields: [counterId], references: [id])
+
+  @@index([agentId])
+  @@index([branchId])
+  @@map("agent_sessions")
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  type      String
+  title     String
+  body      String
+  data      Json?
+  isRead    Boolean   @default(false)
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketId  String?
+  ticket    Ticket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([ticketId])
+  @@map("notifications")
+}
+
+model Feedback {
+  id        String   @id @default(uuid())
+  rating    Int
+  comment   String?
+  tags      String[] @default([])
+  createdAt DateTime @default(now())
+  ticketId  String   @unique
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([ticketId])
+  @@map("feedbacks")
+}
